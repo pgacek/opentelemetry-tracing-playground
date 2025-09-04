@@ -1,0 +1,111 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  jaeger:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:14250
+      thrift_compact:
+        endpoint: 0.0.0.0:6831
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: "development"
+        action: upsert
+      - key: k8s.cluster.name
+        value: "local-docker"
+        action: upsert
+      - key: collector.version
+        value: "0.88.0"
+        action: upsert
+
+  memory_limiter:
+    limit_mib: 512
+    spike_limit_mib: 128
+    check_interval: 5s
+
+  attributes:
+    actions:
+      - key: collector.processed_at
+        action: insert
+        value: now()
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.request.header.cookie
+        action: delete
+
+exporters:
+  otlp/tempo:
+    endpoint: http://tempo:4317
+    tls:
+      insecure: true
+    sending_queue:
+      num_consumers: 10
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 120s
+
+  prometheus:
+    endpoint: "0.0.0.0:8890"
+    const_labels:
+      environment: "development"
+      cluster: "local-docker"
+    namespace: "otel"
+    send_timestamps: true
+    metric_expiration: 180m
+    enable_open_metrics: true
+
+  logging:
+    loglevel: info
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:8889
+    path: /health
+
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  memory_ballast:
+    size_mib: 64
+
+
+service:
+  extensions: [health_check, pprof, memory_ballast]
+
+  pipelines:
+    traces:
+      receivers: [otlp, jaeger]
+
+      processors: [memory_limiter, resource, attributes, batch]
+      exporters: [otlp/tempo, logging]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, logging]
+
+  telemetry:
+    logs:
+      level: info
+      development: false
+    metrics:
+      address: 0.0.0.0:8888
+      level: normal

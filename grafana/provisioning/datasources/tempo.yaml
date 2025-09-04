@@ -1,0 +1,68 @@
+# Grafana datasource configuration for complete observability stack
+# This file automatically configures both Tempo (traces) and Prometheus (metrics) when Grafana starts
+
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    type: tempo
+    access: proxy
+    # Point to our Tempo container
+    url: http://tempo:3200
+    uid: tempo
+    isDefault: false
+
+    # Configure how Grafana integrates Tempo with other data sources
+    jsonData:
+      # Enable trace to logs correlation (useful when you add logging later)
+      tracesToLogs:
+        datasourceUid: 'loki'  # We'll add Loki later if you want logs
+        tags: ['job', 'instance', 'pod', 'namespace']
+        mappedTags: [{ key: 'service.name', value: 'service' }]
+        mapTagNamesEnabled: false
+        spanStartTimeShift: '1h'
+        spanEndTimeShift: '1h'
+        filterByTraceID: false
+        filterBySpanID: false
+
+      # Enable service map functionality - this requires metrics from Prometheus
+      serviceMap:
+        datasourceUid: 'prometheus'  # Links to our Prometheus datasource
+
+      # Configure node graph visualization
+      nodeGraph:
+        enabled: true
+
+      # Search configuration
+      search:
+        hide: false
+
+      # Enable streaming for real-time trace updates
+      streaming:
+        enabled: true
+
+      # Configure span limits for large traces
+      spanBar:
+        type: 'Tag'
+        tag: 'http.status_code'
+
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # Point to our Prometheus container
+    url: http://prometheus:9090
+    uid: prometheus
+    isDefault: true  # Make Prometheus the default for metrics queries
+
+    # Configure Prometheus integration settings
+    jsonData:
+      # Set the default query timeout
+      timeInterval: "15s"
+      # Enable query result caching for better performance
+      cacheLevel: 'High'
+      # Configure how Grafana connects traces to metrics
+      exemplarTraceIdDestinations:
+        # This links metrics back to traces using trace IDs stored in exemplars
+        - name: trace_id
+          datasourceUid: 'tempo'
+          url: '/explore?left=["now-1h","now","tempo",{"query":"${__value.raw}"}]'
